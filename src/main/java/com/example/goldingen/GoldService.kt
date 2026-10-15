@@ -282,11 +282,17 @@ class GoldService : AccessibilityService() {
     private fun look(): Bitmap? {
         val b = grab() ?: return null
         if (isDeadScreen(b)) {
-            deaths++
-            say("Öldün, Free Revival'a basılıyor")
-            tapPoint("revive")
-            pause(4000)
-            throw Restart()
+            // tek bir kareye güvenme: biraz bekleyip tekrar bak
+            pause(1200)
+            val b2 = grab()
+            if (b2 != null && isDeadScreen(b2)) {
+                deaths++
+                say("Öldün, Free Revival'a basılıyor")
+                tapPoint("revive")
+                pause(4000)
+                throw Restart()
+            }
+            return b2 ?: b
         }
         return b
     }
@@ -476,35 +482,57 @@ class GoldService : AccessibilityService() {
 
     // ------------------------------------------------------------------ olum ekrani
 
-    private fun patchColor(b: Bitmap, name: String): Int {
-        val p = pt(name)
-        val cx = (p.first * b.width).toInt()
-        val cy = (p.second * b.height).toInt()
-        var r = 0L
-        var g = 0L
-        var bl = 0L
-        var n = 0
-        for (y in maxOf(0, cy - 10)..minOf(b.height - 1, cy + 10)) {
-            for (x in maxOf(0, cx - 10)..minOf(b.width - 1, cx + 10)) {
-                val c = b.getPixel(x, y)
-                r += Color.red(c)
-                g += Color.green(c)
-                bl += Color.blue(c)
-                n++
+    /** Free Revival duğmesi bölgesini 9x5 ızgaraya bölüp her hücrenin ortalama rengini (r,g,b) çıkarır. */
+    private fun reviveGrid(b: Bitmap): IntArray {
+        val cols = 9
+        val rows = 5
+        val p = pt("revive")
+        val out = IntArray(cols * rows * 3)
+        val hw = 0.06f * b.width
+        val hh = 0.03f * b.height
+        val px = p.first * b.width
+        val py = p.second * b.height
+        var k = 0
+        for (r in 0 until rows) {
+            for (c in 0 until cols) {
+                val cx = (px - hw + (c + 0.5f) * (2f * hw / cols)).toInt()
+                val cy = (py - hh + (r + 0.5f) * (2f * hh / rows)).toInt()
+                var sr = 0
+                var sg = 0
+                var sb = 0
+                var n = 0
+                for (y in maxOf(0, cy - 2)..minOf(b.height - 1, cy + 2)) {
+                    for (x in maxOf(0, cx - 2)..minOf(b.width - 1, cx + 2)) {
+                        val col = b.getPixel(x, y)
+                        sr += Color.red(col)
+                        sg += Color.green(col)
+                        sb += Color.blue(col)
+                        n++
+                    }
+                }
+                if (n == 0) n = 1
+                out[k++] = sr / n
+                out[k++] = sg / n
+                out[k++] = sb / n
             }
         }
-        if (n == 0) return 0
-        return Color.rgb((r / n).toInt(), (g / n).toInt(), (bl / n).toInt())
+        return out
+    }
+
+    /** Kayıtlı ölüm ekranı referansına ortalama renk farkı (0 = aynı). Referans yoksa null. */
+    private fun reviveDiff(b: Bitmap): Float? {
+        val s = prefs().getString("reviveG", null) ?: return null
+        val ref = s.split(",").mapNotNull { it.toIntOrNull() }
+        val cur = reviveGrid(b)
+        if (ref.size != cur.size) return null
+        var sum = 0L
+        for (i in cur.indices) sum += Math.abs(cur[i] - ref[i])
+        return sum.toFloat() / cur.size
     }
 
     private fun isDeadScreen(b: Bitmap): Boolean {
-        if (!prefs().contains("reviveC")) return false
-        val ref = prefs().getInt("reviveC", 0)
-        val c = patchColor(b, "revive")
-        val dr = Color.red(c) - Color.red(ref)
-        val dg = Color.green(c) - Color.green(ref)
-        val db = Color.blue(c) - Color.blue(ref)
-        return Math.sqrt((dr * dr + dg * dg + db * db).toDouble()) < 35.0
+        val d = reviveDiff(b) ?: return false
+        return d < 14f
     }
 
     // ------------------------------------------------------------------ dokunma
@@ -871,7 +899,8 @@ class GoldService : AccessibilityService() {
                 val sc = scanMap(b)
                 val mf = miniFrac(b)
                 val st = readStats(b)
-                val dead = isDeadScreen(b)
+                val rd = reviveDiff(b)
+                val dead = if (rd == null) "referans yok" else String.format("fark %.1f (eşik 14, %s)", rd, if (rd < 14f) "ÖLÜ SANIYOR" else "normal")
                 val radius = cfgI("radius", 150).toFloat()
                 var near = "-"
                 val me = sc.player
@@ -997,6 +1026,10 @@ class GoldService : AccessibilityService() {
             btn.textSize = 11f
             addBtn(if (i < 6) left else right, btn)
         }
+        addBtn(right, mkBtn("Ölüm referansını sil (ölüm tespitini kapat)") {
+            prefs().edit().remove("reviveG").remove("reviveC").apply()
+            say("Ölüm referansı silindi, ölüm tespiti kapalı")
+        })
         addBtn(right, mkBtn("Menüyü kapat") { toggleMenu() })
         row.addView(left)
         row.addView(right)
@@ -1059,7 +1092,7 @@ class GoldService : AccessibilityService() {
                             Thread.sleep(700)
                             val b = grab()
                             if (b != null) {
-                                prefs().edit().putInt("reviveC", patchColor(b, "revive")).apply()
+                                prefs().edit().putString("reviveG", reviveGrid(b).joinToString(",")).apply()
                                 say("Ölüm ekranı referansı kaydedildi")
                             }
                         } catch (e: Exception) {
