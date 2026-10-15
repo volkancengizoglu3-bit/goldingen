@@ -134,6 +134,16 @@ class GoldService : AccessibilityService() {
     private var extra: View? = null
     private var statusView: TextView? = null
     private var startBtn: Button? = null
+    private var statsView: TextView? = null
+    private var dotView: View? = null
+
+    private val GOLD = 0xFFF5B83D.toInt()
+    private val PANEL_BG = 0xF2161920.toInt()
+    private val CARD_BG = 0xFF272C3A.toInt()
+    private val MISSING_BG = 0xFF4A2429.toInt()
+    private val TEXT_DIM = 0xFF9AA3B5.toInt()
+    private val OK = 0xFF3DDC84.toInt()
+    private val BAD = 0xFFE5484D.toInt()
 
     @Volatile
     private var running = false
@@ -187,8 +197,8 @@ class GoldService : AccessibilityService() {
 
     private fun say(msg: String) {
         ui {
-            statusView?.text = msg + "\nBoss: " + kills + "  Ölüm: " + deaths +
-                "  Random: " + randoms + "  Buff: " + buffs
+            statusView?.text = msg
+            statsView?.text = "Boss " + kills + "  ·  Ölüm " + deaths + "  ·  Random " + randoms + "  ·  Buff " + buffs
         }
     }
 
@@ -881,7 +891,13 @@ class GoldService : AccessibilityService() {
     }
 
     private fun updateUi() {
-        startBtn?.text = if (running) "■ Durdur" else "▶ Başlat"
+        val btn = startBtn
+        if (btn != null) {
+            btn.text = if (running) "■  Durdur" else "▶  Başlat"
+            btn.background = rounded(if (running) BAD else GOLD, 12)
+            btn.setTextColor(if (running) Color.WHITE else 0xFF1A1300.toInt())
+        }
+        dotView?.background = oval(if (running) OK else GOLD)
     }
 
     // ------------------------------------------------------------------ test
@@ -927,75 +943,131 @@ class GoldService : AccessibilityService() {
 
     // ------------------------------------------------------------------ panel ve menu
 
-    private fun mkBtn(text: String, onClick: () -> Unit): Button {
+    private fun rounded(color: Int, r: Int): GradientDrawable {
+        val g = GradientDrawable()
+        g.setColor(color)
+        g.cornerRadius = dp(r).toFloat()
+        return g
+    }
+
+    private fun oval(color: Int): GradientDrawable {
+        val g = GradientDrawable()
+        g.shape = GradientDrawable.OVAL
+        g.setColor(color)
+        return g
+    }
+
+    private fun mkBtn(text: String, bg: Int = CARD_BG, fg: Int = Color.WHITE, onClick: () -> Unit): Button {
         val b = Button(this)
         b.text = text
         b.textSize = 12f
         b.isAllCaps = false
-        b.setTextColor(Color.WHITE)
-        b.setPadding(dp(8), 0, dp(8), 0)
+        b.setTextColor(fg)
+        b.setPadding(dp(10), dp(4), dp(10), dp(4))
         b.minHeight = 0
         b.minimumHeight = 0
         b.minWidth = 0
         b.minimumWidth = 0
-        val bg = GradientDrawable()
-        bg.setColor(0xCC222222.toInt())
-        bg.cornerRadius = dp(6).toFloat()
-        b.background = bg
+        b.background = rounded(bg, 10)
         b.setOnClickListener { onClick() }
         return b
     }
 
-    private fun addBtn(col: LinearLayout, btn: Button) {
-        val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(34))
-        lp.topMargin = dp(3)
+    private fun addBtn(col: LinearLayout, btn: Button, h: Int = LinearLayout.LayoutParams.WRAP_CONTENT) {
+        val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, h)
+        lp.topMargin = dp(6)
         col.addView(btn, lp)
+    }
+
+    private fun overlayParams(w: Int): WindowManager.LayoutParams {
+        return WindowManager.LayoutParams(
+            w,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        )
     }
 
     private fun buildPanel() {
         val outer = LinearLayout(this)
         outer.orientation = LinearLayout.VERTICAL
+        outer.background = rounded(PANEL_BG, 16)
+        outer.setPadding(dp(12), dp(10), dp(12), dp(12))
+
+        // ust satir: durum noktasi, baslik, gizle
+        val head = LinearLayout(this)
+        head.orientation = LinearLayout.HORIZONTAL
+        head.gravity = Gravity.CENTER_VERTICAL
+        val dot = View(this)
+        dotView = dot
+        head.addView(dot, LinearLayout.LayoutParams(dp(10), dp(10)))
+        val title = TextView(this)
+        title.text = "Goldingen"
+        title.textSize = 15f
+        title.setTextColor(Color.WHITE)
+        title.typeface = android.graphics.Typeface.DEFAULT_BOLD
+        title.setPadding(dp(8), 0, 0, 0)
+        head.addView(title, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        val hide = TextView(this)
+        hide.text = "▾"
+        hide.textSize = 18f
+        hide.setTextColor(TEXT_DIM)
+        hide.setPadding(dp(10), 0, dp(4), 0)
+        head.addView(hide)
+        outer.addView(head)
 
         val inner = LinearLayout(this)
         inner.orientation = LinearLayout.VERTICAL
         body = inner
 
         val st = TextView(this)
-        st.textSize = 11f
+        st.textSize = 12f
         st.setTextColor(Color.WHITE)
-        st.setBackgroundColor(0xAA000000.toInt())
-        st.setPadding(dp(4), dp(2), dp(4), dp(2))
+        st.maxLines = 7
+        st.setPadding(0, dp(8), 0, dp(2))
         st.text = "Hazır"
-        st.maxWidth = dp(280)
         statusView = st
         inner.addView(st)
 
-        val sb = mkBtn("▶ Başlat") { toggle() }
-        startBtn = sb
-        addBtn(inner, sb)
-        addBtn(inner, mkBtn("Shizuku izni") { shizukuAsk() })
-        addBtn(inner, mkBtn("Test") { runTest() })
-        addBtn(inner, mkBtn("Ayar") { toggleMenu() })
+        val stats = TextView(this)
+        stats.textSize = 11f
+        stats.setTextColor(TEXT_DIM)
+        stats.text = "Boss 0  ·  Ölüm 0  ·  Random 0  ·  Buff 0"
+        statsView = stats
+        inner.addView(stats)
 
-        val hide = mkBtn("▼ Gizle") { }
-        hide.setOnClickListener {
-            val v = inner.visibility == View.VISIBLE
-            inner.visibility = if (v) View.GONE else View.VISIBLE
-            hide.text = if (v) "▲ Göster" else "▼ Gizle"
+        val sb = mkBtn("▶  Başlat") { toggle() }
+        sb.textSize = 15f
+        sb.typeface = android.graphics.Typeface.DEFAULT_BOLD
+        startBtn = sb
+        addBtn(inner, sb, dp(44))
+
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        val names = listOf("Shizuku", "Test", "Ayar")
+        val acts = listOf({ shizukuAsk() }, { runTest() }, { toggleMenu() })
+        for (i in names.indices) {
+            val bt = mkBtn(names[i]) { acts[i]() }
+            val lp = LinearLayout.LayoutParams(0, dp(36), 1f)
+            if (i > 0) lp.leftMargin = dp(6)
+            row.addView(bt, lp)
         }
-        addBtn(outer, hide)
+        val rlp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        rlp.topMargin = dp(8)
+        inner.addView(row, rlp)
         outer.addView(inner)
 
-        val lp = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            PixelFormat.TRANSLUCENT
-        )
+        hide.setOnClickListener {
+            val open = inner.visibility == View.VISIBLE
+            inner.visibility = if (open) View.GONE else View.VISIBLE
+            hide.text = if (open) "▸" else "▾"
+        }
+
+        val lp = overlayParams(dp(220))
         lp.gravity = Gravity.TOP or Gravity.START
-        lp.x = 0
-        lp.y = (screenH * 0.30f).toInt()
+        lp.x = dp(6)
+        lp.y = (screenH * 0.22f).toInt()
         wm.addView(outer, lp)
         panel = outer
         updateUi()
@@ -1011,41 +1083,62 @@ class GoldService : AccessibilityService() {
             menu = null
             return
         }
-        val row = LinearLayout(this)
-        row.orientation = LinearLayout.HORIZONTAL
-        row.setBackgroundColor(0xAA000000.toInt())
-        val left = LinearLayout(this)
-        left.orientation = LinearLayout.VERTICAL
-        val right = LinearLayout(this)
-        right.orientation = LinearLayout.VERTICAL
-        for ((i, n) in NAMES.withIndex()) {
-            val mark = if (prefs().contains(n + "_x") || DEFAULTS.containsKey(n)) "✓ " else "✗ "
-            val btn = mkBtn(mark + n + ": " + (LABELS[n] ?: n)) {
+        val card = LinearLayout(this)
+        card.orientation = LinearLayout.VERTICAL
+        card.background = rounded(PANEL_BG, 16)
+        card.setPadding(dp(12), dp(10), dp(12), dp(12))
+
+        val title = TextView(this)
+        title.text = "Nokta işaretleme"
+        title.textSize = 15f
+        title.setTextColor(Color.WHITE)
+        title.typeface = android.graphics.Typeface.DEFAULT_BOLD
+        card.addView(title)
+        val hint = TextView(this)
+        hint.text = "Oyunda ilgili ekranı aç, aşağıdan bir satıra dokun, sonra oyun ekranında o noktaya dokun. Kırmızı satırlar henüz işaretlenmedi."
+        hint.textSize = 11f
+        hint.setTextColor(TEXT_DIM)
+        hint.setPadding(0, dp(2), 0, dp(4))
+        card.addView(hint)
+
+        val list = LinearLayout(this)
+        list.orientation = LinearLayout.VERTICAL
+        for (n in NAMES) {
+            val set = prefs().contains(n + "_x") || DEFAULTS.containsKey(n)
+            val btn = mkBtn((if (set) "✓  " else "✗  ") + n + "\n" + (LABELS[n] ?: n), if (set) CARD_BG else MISSING_BG) {
                 beginCapture(n)
             }
             btn.textSize = 11f
-            addBtn(if (i < 6) left else right, btn)
+            btn.gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            btn.setPadding(dp(12), dp(8), dp(12), dp(8))
+            addBtn(list, btn)
         }
-        addBtn(right, mkBtn("Ölüm referansını sil (ölüm tespitini kapat)") {
+        val sv = android.widget.ScrollView(this)
+        sv.addView(list)
+        card.addView(sv, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (screenH * 0.55f).toInt()))
+
+        val bottom = LinearLayout(this)
+        bottom.orientation = LinearLayout.HORIZONTAL
+        val b1 = mkBtn("Ölüm referansını sil", MISSING_BG) {
             prefs().edit().remove("reviveG").remove("reviveC").apply()
             say("Ölüm referansı silindi, ölüm tespiti kapalı")
-        })
-        addBtn(right, mkBtn("Menüyü kapat") { toggleMenu() })
-        row.addView(left)
-        row.addView(right)
+        }
+        val b2 = mkBtn("Kapat", GOLD, 0xFF1A1300.toInt()) { toggleMenu() }
+        val l1 = LinearLayout.LayoutParams(0, dp(38), 1f)
+        val l2 = LinearLayout.LayoutParams(0, dp(38), 1f)
+        l2.leftMargin = dp(6)
+        bottom.addView(b1, l1)
+        bottom.addView(b2, l2)
+        val blp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        blp.topMargin = dp(8)
+        card.addView(bottom, blp)
 
-        val lp = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            PixelFormat.TRANSLUCENT
-        )
+        val lp = overlayParams(dp(330))
         lp.gravity = Gravity.TOP or Gravity.START
-        lp.x = dp(150)
-        lp.y = dp(10)
-        wm.addView(row, lp)
-        menu = row
+        lp.x = dp(236)
+        lp.y = dp(8)
+        wm.addView(card, lp)
+        menu = card
     }
 
     private fun removeExtra() {
